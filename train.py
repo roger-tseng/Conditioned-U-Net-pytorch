@@ -41,17 +41,17 @@ def main(args):
         os.mkdir(ckpt_dir)
 
     checkpoint_callback = ModelCheckpoint(
-        filepath=ckpt_dir,
+        dirpath=ckpt_dir,
         save_top_k=dict_args['save_top_k'],
         verbose=False,
-        monitor='val_loss',
-        prefix=dict_args['model_name'] + '_',
+        monitor='loss/val_loss',
+        #prefix=dict_args['model_name'] + '_',
         save_last=True,
         save_weights_only= True
     )
 
     early_stop_callback = EarlyStopping(
-        monitor='val_loss',
+        monitor='loss/val_loss',
         min_delta=0.0,
         patience=dict_args['patience'],
         verbose=False
@@ -62,16 +62,18 @@ def main(args):
             gpus=dict_args['gpus'],
             precision=16,
             logger=logger,
-            checkpoint_callback=checkpoint_callback,
-            early_stop_callback=early_stop_callback,
+            callbacks=[checkpoint_callback, early_stop_callback],
+            #checkpoint_callback=checkpoint_callback,
+            #early_stop_callback=early_stop_callback,
             distributed_backend=dict_args['distributed_backend']
         )
     else:
         trainer = Trainer(
             gpus=dict_args['gpus'],
             logger=logger,
-            checkpoint_callback=checkpoint_callback,
-            early_stop_callback=early_stop_callback,
+            callbacks=[checkpoint_callback, early_stop_callback],
+            #checkpoint_callback=checkpoint_callback,
+            #early_stop_callback=early_stop_callback,
             distributed_backend=dict_args['distributed_backend']
         )
 
