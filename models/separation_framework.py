@@ -61,7 +61,6 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
         target = self.to_spec(target_signal)
         target_hat = self.forward(mixture_signal, condition)
         loss = f.mse_loss(target, target_hat)
-        #result = pl.TrainResult(loss)
         self.log('loss/train_loss', loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,reduce_fx=torch.mean)
         return loss
 
@@ -93,7 +92,6 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
         # large value of SDR means good performance, so that we take the negative of sdr for the validation loss
         loss = -1 * loss
 
-        #result = pl.EvalResult(checkpoint_on=loss, early_stop_on=loss)
         self.log('loss/val_loss', loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,reduce_fx=torch.mean)
         return loss
 

@@ -70,7 +70,7 @@ def main(args):
     else:
         trainer = Trainer(
             gpus=dict_args['gpus'],
-            logger=logger, 
+            logger=logger,
             callbacks=[checkpoint_callback, early_stop_callback],
             #checkpoint_callback=checkpoint_callback,
             #early_stop_callback=early_stop_callback,
