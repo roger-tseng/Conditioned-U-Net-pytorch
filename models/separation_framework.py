@@ -61,10 +61,9 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
         target = self.to_spec(target_signal)
         target_hat = self.forward(mixture_signal, condition)
         loss = f.mse_loss(target, target_hat)
-        result = pl.TrainResult(loss)
-        result.log('loss/train_loss', loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,
-                   reduce_fx=torch.mean)
-        return result
+        #result = pl.TrainResult(loss)
+        self.log('loss/train_loss', loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,reduce_fx=torch.mean)
+        return loss
 
     # Validation Process
     def on_validation_epoch_start(self):
@@ -94,10 +93,9 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
         # large value of SDR means good performance, so that we take the negative of sdr for the validation loss
         loss = -1 * loss
 
-        result = pl.EvalResult(checkpoint_on=loss, early_stop_on=loss)
-        result.log('loss/val_loss', loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,
-                   reduce_fx=torch.mean)
-        return result
+        #result = pl.EvalResult(checkpoint_on=loss, early_stop_on=loss)
+        self.log('loss/val_loss', loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,reduce_fx=torch.mean)
+        return loss
 
     def on_validation_epoch_end(self):
         val_ids = [0] if self.dev_mode else [0, 1, 2]
