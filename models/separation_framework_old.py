@@ -216,7 +216,7 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
     def add_model_specific_args(parent_parser):
         parser = ArgumentParser(parents=[parent_parser], add_help=False)
 
-        parser.add_argument('--lr', type=float, default=1e-4)
+        parser.add_argument('--lr', type=float, default=1e-3)
         parser.add_argument('--optimizer', type=str, default='adam')
 
         return parser
@@ -243,8 +243,6 @@ class CUNET_Framework(Conditional_Source_Separation):
 
         cunet_args = cunet.CUNET.get_arg_keys()
         self.spec2spec = cunet.CUNET(**{key: kwargs[key] for key in cunet_args})
-        self.discriminator = cunet.Discriminator(2, num_frame, hop_length)
-        #self.adversarial_loss = nn.BCEWithLogitsLoss()
 
         self.init_weights()
 
@@ -256,78 +254,6 @@ class CUNET_Framework(Conditional_Source_Separation):
             output_spec = input_spec * output_spec
 
         return output_spec
-
-    @staticmethod
-    def adversarial_loss(y_hat, y):
-        return f.binary_cross_entropy_with_logits(y_hat, y)
-        
-    def training_step(self, batch, batch_idx, optimizer_idx):
-        mixture_signal, target_signal, condition = batch
-        target = self.to_spec(target_signal)
-        #if (target.shape != target_hat.shape):
-        #    print("target.shape:", target.shape)
-        #    print("target_hat.shape:", target_hat.shape)
-        # train generator
-        if optimizer_idx == 0:
-            target_hat = self.forward(mixture_signal, condition)
-
-            # ground truth result (ie: all fake)
-            # put on GPU because we created this tensor inside training_loop
-            valid = torch.ones(target.size(0), 1)
-            valid = valid.type_as(target)
-
-            # adversarial loss is binary cross-entropy
-            g_loss = self.adversarial_loss(self.discriminator(target_hat), valid)
-            tqdm_dict = {'g_loss': g_loss}
-            self.log_dict(tqdm_dict)
-            with torch.no_grad():
-                if (torch.isnan(g_loss).any()):
-                    print("target is nan:", torch.isnan(target).any())
-                    print("target_hat is nan", torch.isnan(target_hat).any())
-                    raise NotImplementedError
-            return g_loss
-
-        # train discriminator
-        if optimizer_idx == 1:
-            # Measure discriminator's ability to classify real from generated samples
-
-            # how well can it label as real?
-            valid = torch.ones(target.size(0), 1)
-            valid = valid.type_as(target)
-
-            real_loss = self.adversarial_loss(self.discriminator(target), valid)
-
-            # how well can it label as fake?
-            fake = torch.zeros(target.size(0), 1)
-            fake = fake.type_as(target)
-
-            fake_loss = self.adversarial_loss(self.discriminator(self.forward(mixture_signal, condition).detach()), fake)
-
-            # discriminator loss is the average of these
-            d_loss = (real_loss + fake_loss) / 2
-            tqdm_dict = {'d_loss': d_loss}
-            self.log_dict(tqdm_dict)
-            with torch.no_grad():
-                if (torch.isnan(d_loss).any()):
-                    print("target is nan:", torch.isnan(target).any())
-                    print("target_hat is nan", torch.isnan(target_hat).any())
-                    raise NotImplementedError
-            return d_loss
-        
-    def configure_optimizers(self):
-
-        if self.optimizer == "adam":
-            optimizer = torch.optim.Adam
-        elif self.optimizer == "adagrad":
-            optimizer = torch.optim.Adagrad
-        elif self.optimizer == "sgd":
-            optimizer = torch.optim.SGD
-        elif self.optimizer == "rmsprop":
-            optimizer = torch.optim.RMSprop
-        else:
-            optimizer = torch.optim.Adam
-
-        return [optimizer(self.spec2spec.parameters(), lr=float(self.lr)), optimizer(self.discriminator.parameters(), lr=float(self.lr))], []
 
     def init_weights(self):
         for param in self.parameters():
@@ -389,4 +315,3 @@ class CUNET_Framework(Conditional_Source_Separation):
         parser.add_argument('--control_n_layer', type=int, default=4)
 
         return Conditional_Source_Separation.add_model_specific_args(parser)
-

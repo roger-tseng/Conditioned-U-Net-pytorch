@@ -159,16 +159,99 @@ class CUNET(pl.LightningModule):
         gammas, betas = self.condition_generator(input_condition)
 
         x = input_spec
-
+        if (torch.isnan(x).any()):
+            print("input is nan!")
         # Encoding Phase
         encoder_outputs = []
+        i = 0
         for encoder, gamma, beta in zip(self.encoders, gammas, betas):
             encoder_outputs.append(encoder(x, gamma, beta))  # TODO
             x = encoder_outputs[-1]
+            if (torch.isnan(x).any()):
+                print(f"encoder x is nan! At i={i}:", encoder)
+                print("Previous x shapes:")
+                for j in encoder_outputs:
+                    print(j.shape)
+                print("gamma shape:", gamma.shape)
+                print("beta shape:", beta.shape)
+            i += 1
 
         # Decoding Phase
+        i = 0
         x = self.decoders[0](x)
+        if (torch.isnan(x).any()):
+            print("decoder[0] x is nan!")
+        i += 1
         for decoder, x_encoded in zip(self.decoders[1:], reversed(encoder_outputs[:-1])):
             x = decoder(torch.cat([x, x_encoded], dim=-3))
-
+            if (torch.isnan(x).any()):
+                print(f"decoder x is nan! At i={i}:", decoder)
+            i += 1
+        if (torch.isnan(x).any()):
+            raise NotImplementedError
         return x
+
+import math
+from typing import List, Tuple
+import torch.nn.functional as f
+
+def get_same_padding(x: int, k: int, s: int, d: int):
+    return max((math.ceil(x / s) - 1) * s + (k - 1) * d + 1 - x, 0)
+
+def pad_same(x, k: List[int], s: List[int], d: List[int] = (1, 1), value: float = 0):
+    ih, iw = x.size()[-2:]
+    pad_h, pad_w = get_same_padding(ih, k[0], s[0], d[0]), get_same_padding(iw, k[1], s[1], d[1])
+    if pad_h > 0 or pad_w > 0:
+        x = f.pad(x, [pad_w // 2, pad_w - pad_w // 2, pad_h // 2, pad_h - pad_h // 2], value=value)
+    return x
+
+class Conv2d_pad_lrelu(pl.LightningModule):
+    def __init__(self, in_dim, out_dim, k, s, norm=True):
+        super(Conv2d_pad_lrelu, self).__init__()
+        self.k = k
+        self.s = s
+        self.norm = norm
+        self.conv2d = nn.Conv2d(in_dim, out_dim, kernel_size=k, stride=s)
+        self.bnorm = nn.BatchNorm2d(out_dim)
+        self.act = nn.LeakyReLU(0.2)
+
+    def forward(self, x):
+        y = pad_same(x, list(self.k), list(self.s))
+        y = self.conv2d(y)
+        if self.norm:
+            y = self.bnorm(y)
+        y = self.act(y)
+        return y
+
+class Discriminator(pl.LightningModule):
+    """
+    Input shape: (batch_size, 2, num_frame, hop_length)
+    Output shape: (batch_size, )
+    """
+    def __init__(self, channels, time, freq):
+        self.save_hyperparameters()
+        super(Discriminator, self).__init__()
+
+        dim = 32
+
+        #self.first = Conv2d_pad_lrelu(2, dim, (4,4), (2,2), norm=False)
+        self.first = nn.Sequential(
+            nn.Conv2d(2, dim, (4,4), (2,2)),
+            nn.LeakyReLU(0.2)
+        )
+        self.mid_layers = nn.Sequential(
+            Conv2d_pad_lrelu(32, 64, (4,4), (2,2)),
+            Conv2d_pad_lrelu(64, 128, (4,4), (2,2)),
+            Conv2d_pad_lrelu(128, 256, (4,4), (2,2)),
+            Conv2d_pad_lrelu(256, 512, (4,4), (2,2)),
+            Conv2d_pad_lrelu(512, 512, (2,4), (1,2)),
+            Conv2d_pad_lrelu(512, 512, (2,4), (1,2))
+        )
+        self.last = nn.Conv2d(512, 1, 4, 2)
+
+    def forward(self, x):
+        y = self.first(x)
+        y = self.mid_layers(y)
+        y = self.last(y)
+        y = y.view(-1).unsqueeze(dim=1)
+        return y

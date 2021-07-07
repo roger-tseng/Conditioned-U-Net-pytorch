@@ -55,7 +55,7 @@ class MusdbTrainSet(Dataset):
 
     def __getitem__(self, whatever):
         source_sample = {target: self.get_random_audio_sample(target) for target in self.source_names}
-        rand_target = np.random.choice(self.target_names)
+        rand_target = 'vocals'#np.random.choice(self.target_names)
 
         mixture = sum(source_sample.values())
         target = source_sample[rand_target]
