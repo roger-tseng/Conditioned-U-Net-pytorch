@@ -218,8 +218,8 @@ class Conv2d_pad_lrelu(pl.LightningModule):
     def forward(self, x):
         y = pad_same(x, list(self.k), list(self.s))
         y = self.conv2d(y)
-        if self.norm:
-            y = self.bnorm(y)
+        #if self.norm:
+        #    y = self.bnorm(y)
         y = self.act(y)
         return y
 

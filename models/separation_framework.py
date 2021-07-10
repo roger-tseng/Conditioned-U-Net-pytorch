@@ -14,6 +14,9 @@ from pytorch_lightning.loggers import WandbLogger
 import models.cunet_model as cunet
 from models import fourier
 
+# for WGAN-GP
+from torch.autograd import Variable
+from torch.autograd import grad as torch_grad
 
 def get_estimation(idx, target_name, estimation_dict):
     estimated = estimation_dict[target_name][idx]
@@ -260,7 +263,35 @@ class CUNET_Framework(Conditional_Source_Separation):
     @staticmethod
     def adversarial_loss(y_hat, y):
         return f.binary_cross_entropy_with_logits(y_hat, y)
-        
+
+    def gradient_penalty(self, real_data, generated_data):
+        batch_size = real_data.size()[0]
+
+        # Calculate interpolation
+        alpha = torch.rand(batch_size, 1, 1, 1)
+        alpha = alpha.expand_as(real_data).cuda()
+        interpolated = alpha * real_data.data + (1 - alpha) * generated_data.data
+        interpolated = Variable(interpolated, requires_grad=True).cuda()
+
+        # Calculate probability of interpolated examples
+        prob_interpolated = self.discriminator(interpolated)
+
+        # Calculate gradients of probabilities with respect to examples
+        gradients = torch_grad(outputs=prob_interpolated, inputs=interpolated,
+                                grad_outputs=torch.ones(prob_interpolated.size()).cuda(),
+                                create_graph=True, retain_graph=True)[0]
+
+        # Gradients have shape (batch_size, num_channels, img_width, img_height),
+        # so flatten to easily take norm per example in batch
+        gradients = gradients.view(batch_size, -1)
+
+        # Derivatives of the gradient close to 0 can cause problems because of
+        # the square root, so manually calculate norm and add epsilon
+        gradients_norm = torch.sqrt(torch.sum(gradients ** 2, dim=1) + 1e-12)
+
+        # Return gradient penalty
+        return 10 * ((gradients_norm - 1) ** 2).mean()
+    
     def training_step(self, batch, batch_idx, optimizer_idx):
         mixture_signal, target_signal, condition = batch
         target = self.to_spec(target_signal)
@@ -277,41 +308,46 @@ class CUNET_Framework(Conditional_Source_Separation):
             valid = valid.type_as(target)
 
             # adversarial loss is binary cross-entropy
-            g_loss = self.adversarial_loss(self.discriminator(target_hat), valid)
+            #g_loss = self.adversarial_loss(self.discriminator(target_hat), valid)
+            g_loss = -torch.mean(self.discriminator(target_hat))
             tqdm_dict = {'g_loss': g_loss}
             self.log_dict(tqdm_dict)
-            with torch.no_grad():
-                if (torch.isnan(g_loss).any()):
-                    print("target is nan:", torch.isnan(target).any())
-                    print("target_hat is nan", torch.isnan(target_hat).any())
-                    raise NotImplementedError
+            #with torch.no_grad():
+            #    if (torch.isnan(g_loss).any()):
+            #        print("target is nan:", torch.isnan(target).any())
+            #        print("target_hat is nan", torch.isnan(target_hat).any())
+            #        raise NotImplementedError
             return g_loss
 
         # train discriminator
         if optimizer_idx == 1:
             # Measure discriminator's ability to classify real from generated samples
 
-            # how well can it label as real?
-            valid = torch.ones(target.size(0), 1)
-            valid = valid.type_as(target)
+            #   # how well can it label as real?
+            #   valid = torch.ones(target.size(0), 1)
+            #   valid = valid.type_as(target)
+            #
+            #   real_loss = self.adversarial_loss(self.discriminator(target), valid)
+            #
+            #   # how well can it label as fake?
+            #   fake = torch.zeros(target.size(0), 1)
+            #   fake = fake.type_as(target)
+            #
+            #   fake_loss = self.adversarial_loss(self.discriminator(self.forward(mixture_signal, condition).detach()), fake)
+            #
+            #   # discriminator loss is the average of these
+            #   d_loss = (real_loss + fake_loss) / 2
 
-            real_loss = self.adversarial_loss(self.discriminator(target), valid)
-
-            # how well can it label as fake?
-            fake = torch.zeros(target.size(0), 1)
-            fake = fake.type_as(target)
-
-            fake_loss = self.adversarial_loss(self.discriminator(self.forward(mixture_signal, condition).detach()), fake)
-
-            # discriminator loss is the average of these
-            d_loss = (real_loss + fake_loss) / 2
+            fake = self.forward(mixture_signal, condition)
+            grad_penalty = self.gradient_penalty(target.data, fake.data)
+            d_loss = -torch.mean(self.discriminator(target)) + torch.mean(self.discriminator(fake)) + grad_penalty
             tqdm_dict = {'d_loss': d_loss}
             self.log_dict(tqdm_dict)
-            with torch.no_grad():
-                if (torch.isnan(d_loss).any()):
-                    print("target is nan:", torch.isnan(target).any())
-                    print("target_hat is nan", torch.isnan(target_hat).any())
-                    raise NotImplementedError
+            #with torch.no_grad():
+            #    if (torch.isnan(d_loss).any()):
+            #        print("target is nan:", torch.isnan(target).any())
+            #        print("target_hat is nan", torch.isnan(target_hat).any())
+            #        raise NotImplementedError
             return d_loss
         
     def configure_optimizers(self):
@@ -327,7 +363,10 @@ class CUNET_Framework(Conditional_Source_Separation):
         else:
             optimizer = torch.optim.Adam
 
-        return [optimizer(self.spec2spec.parameters(), lr=float(self.lr)), optimizer(self.discriminator.parameters(), lr=float(self.lr))], []
+        return [
+            {'optimizer': optimizer(self.spec2spec.parameters(), lr=float(self.lr), betas=(0.5, 0.999)), 'frequency': 1},
+            {'optimizer': optimizer(self.discriminator.parameters(), lr=float(self.lr), betas=(0.5, 0.999)), 'frequency': 5},
+        ]
 
     def init_weights(self):
         for param in self.parameters():
