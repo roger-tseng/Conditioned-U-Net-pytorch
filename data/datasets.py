@@ -125,7 +125,7 @@ class MusdbTestSet(Dataset):
 
     def __getitem__(self, idx):
 
-        target_offset = idx % len(self.target_names)
+        target_offset = 0#idx % len(self.target_names)
         idx = idx // len(self.target_names)
 
         target_name = self.target_names[target_offset]
@@ -220,7 +220,7 @@ class MusdbValidSet(Dataset):
 
     def __getitem__(self, idx):
 
-        target_offset = idx % len(self.target_names)
+        target_offset = 0#idx % len(self.target_names)
         idx = idx // len(self.target_names)
 
         target_name = self.target_names[target_offset]

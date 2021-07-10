@@ -26,6 +26,23 @@ def get_estimation(idx, target_name, estimation_dict):
     estimated = np.concatenate([estimated[key] for key in sorted(estimated.keys())], axis=0)
     return estimated
 
+def cal_SISNR(ref_sig, out_sig, eps=1e-8):
+    """Calcuate Scale-Invariant Source-to-Noise Ratio (SI-SNR)
+    Args:
+        ref_sig: numpy.ndarray, [T]
+        out_sig: numpy.ndarray, [T]
+    Returns:
+        SISNR
+    """
+    assert len(ref_sig) == len(out_sig)
+    ref_sig = ref_sig - torch.mean(ref_sig)
+    out_sig = out_sig - torch.mean(out_sig)
+    ref_energy = torch.sum(ref_sig ** 2) + eps
+    proj = torch.sum(ref_sig * out_sig) * ref_sig / ref_energy
+    noise = out_sig - proj
+    ratio = torch.sum(proj ** 2) / (torch.sum(noise ** 2) + eps)
+    sisnr = 10 * np.log(ratio + eps) / np.log(10.0)
+    return sisnr
 
 class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
 
@@ -96,6 +113,7 @@ class Conditional_Source_Separation(pl.LightningModule, metaclass=ABCMeta):
         loss = -1 * loss
 
         self.log('loss/val_loss', loss, prog_bar=False, logger=True, on_step=False, on_epoch=True,reduce_fx=torch.mean)
+        self.log('loss/SISNR', cal_SISNR(estimated_targets.detach().cpu(), targets.detach().cpu()), prog_bar=False, logger=True, on_step=False, on_epoch=True,reduce_fx=torch.mean)
         return loss
 
     def on_validation_epoch_end(self):
@@ -312,6 +330,8 @@ class CUNET_Framework(Conditional_Source_Separation):
             g_loss = -torch.mean(self.discriminator(target_hat))
             tqdm_dict = {'g_loss': g_loss}
             self.log_dict(tqdm_dict)
+            SISNR = cal_SISNR(target_hat.detach().cpu(), target.detach().cpu())
+            self.log_dict({'SISNR': SISNR})
             #with torch.no_grad():
             #    if (torch.isnan(g_loss).any()):
             #        print("target is nan:", torch.isnan(target).any())
@@ -340,7 +360,10 @@ class CUNET_Framework(Conditional_Source_Separation):
 
             fake = self.forward(mixture_signal, condition)
             grad_penalty = self.gradient_penalty(target.data, fake.data)
-            d_loss = -torch.mean(self.discriminator(target)) + torch.mean(self.discriminator(fake)) + grad_penalty
+            neg_D_mean = -torch.mean(self.discriminator(target))
+            G_mean = torch.mean(self.discriminator(fake))
+            d_loss = neg_D_mean + G_mean + grad_penalty
+            #d_loss = -torch.mean(self.discriminator(target)) + torch.mean(self.discriminator(fake)) + grad_penalty
             tqdm_dict = {'d_loss': d_loss}
             self.log_dict(tqdm_dict)
             #with torch.no_grad():
